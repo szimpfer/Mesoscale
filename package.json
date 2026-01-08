@@ -1,0 +1,27 @@
+{
+  "name": "radiosonde",
+  "version": "1.0.0",
+  "description": "AI-powered daily weather briefings via email",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "healthcheck": "bun run src/healthcheck.ts",
+    "test:tempest": "bun run src/weather/tempest.ts",
+    "test:nws": "bun run src/weather/nws.ts",
+    "test:claude": "bun run src/ai/claude.ts",
+    "test:email": "bun run src/email/mailer.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.0",
+    "nodemailer": "^6.9.8"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^6.4.14",
+    "bun-types": "^1.0.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

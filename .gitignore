@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+secrets.txt
+secrets/
+
+# Logs
+logs/
+*.log
+
+# Bun
+bun.lockb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+._*
+
+# Build
+dist/
+build/
+
+# Data
+data/

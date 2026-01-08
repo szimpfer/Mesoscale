@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  radiosonde:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: radiosonde
+    restart: unless-stopped
+
+    environment:
+      # Timezone (find yours: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
+      TZ: ${TZ:-America/New_York}
+
+      # Schedule (default: 6 AM, 12 PM, 6 PM)
+      # Format: minute hour day month weekday
+      CRON_SCHEDULE: ${CRON_SCHEDULE:-0 6,12,18 * * *}
+
+      # Run immediately on container start (default: true)
+      RUN_ON_STARTUP: ${RUN_ON_STARTUP:-true}
+
+      # Tempest Weather Station
+      TEMPEST_TOKEN: ${TEMPEST_TOKEN}
+      TEMPEST_STATION_ID: ${TEMPEST_STATION_ID:-36763}
+
+      # Location
+      NWS_LAT: ${NWS_LAT:-42.9054}
+      NWS_LON: ${NWS_LON:--78.6923}
+      NWS_OFFICE: ${NWS_OFFICE:-BUF}
+      LOCATION_NAME: ${LOCATION_NAME:-Buffalo, NY}
+
+      # Claude AI
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+
+      # Email
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      EMAIL_TO: ${EMAIL_TO}
+
+    volumes:
+      - ./logs:/tmp
+
+    healthcheck:
+      test: ["CMD", "bun", "run", "src/healthcheck.ts"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
