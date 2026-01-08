@@ -11,6 +11,40 @@ const client = new Anthropic({
   apiKey: CONFIG.claude.apiKey
 });
 
+type TimeOfDay = 'morning' | 'midday' | 'evening';
+
+function getTimeOfDay(date: Date = new Date()): TimeOfDay {
+  const hour = date.getHours();
+  if (hour < 10) return 'morning';
+  if (hour < 15) return 'midday';
+  return 'evening';
+}
+
+function getTimeContext(timeOfDay: TimeOfDay): { label: string; focus: string; greeting: string } {
+  switch (timeOfDay) {
+    case 'morning':
+      return {
+        label: 'morning',
+        greeting: 'Good morning',
+        focus: 'Focus on the day ahead: current conditions, today\'s forecast, and any commute impacts.'
+      };
+    case 'midday':
+      return {
+        label: 'midday',
+        greeting: 'Good afternoon',
+        focus: 'Focus on the afternoon and evening: how conditions have evolved, what to expect for the rest of today and tonight.'
+      };
+    case 'evening':
+      return {
+        label: 'evening',
+        greeting: 'Good evening',
+        focus: 'Focus on tonight and tomorrow: overnight conditions, tomorrow\'s outlook, and any changes from earlier forecasts.'
+      };
+  }
+}
+
+export { getTimeOfDay, TimeOfDay };
+
 function buildPrompt(data: WeatherData): string {
   const t = data.tempest;
   const a = data.airport;
@@ -21,16 +55,20 @@ function buildPrompt(data: WeatherData): string {
   const today = new Date();
   const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
   const isThursday = today.getDay() === 4;
+  const timeOfDay = getTimeOfDay(today);
+  const timeContext = getTimeContext(timeOfDay);
+  const timeStr = today.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
-  let prompt = `You are a personal meteorologist writing a morning weather briefing email.
+  let prompt = `You are a personal meteorologist writing a ${timeContext.label} weather briefing email.
 
 LOCATION: ${CONFIG.location.description}
 Nearby areas of interest: ${CONFIG.location.nearbyAreas.join(', ')}
 
+TIME: ${timeStr} on ${dayOfWeek} (${timeContext.label} update)
+
 HOUSEHOLD CONTEXT (for relevant weather impacts):
 - Michelle works at a school in Alden, NY (${CONFIG.family.michelle.schedule})
 - Scott works in East Aurora, NY (${CONFIG.family.scott.schedule})${isThursday ? ' - TODAY IS THURSDAY (Scott commutes to East Aurora)' : ''}
-- Today is ${dayOfWeek}
 
 CURRENT CONDITIONS FROM PERSONAL WEATHER STATION:
 `;
@@ -88,9 +126,9 @@ ACTIVE ALERTS:
   }
 
   prompt += `
-Write a conversational weather briefing (3-4 short paragraphs, under 300 words) that:
-1. Opens with current conditions in plain language
-2. Explains what to expect today and tonight
+Write a conversational ${timeContext.label} weather briefing (3-4 short paragraphs, under 300 words) that:
+1. Opens with "${timeContext.greeting}" and current conditions in plain language
+2. ${timeContext.focus}
 3. Highlights notable weather in the next 7 days
 4. Mentions any hazards or alerts (if present)
 5. Uses a friendly, informative tone - like talking to a friend

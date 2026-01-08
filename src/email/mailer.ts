@@ -34,13 +34,21 @@ export async function sendEmail(options: EmailOptions): Promise<void> {
   console.log(`Email sent: ${info.messageId}`);
 }
 
+function getTimeLabel(date: Date): string {
+  const hour = date.getHours();
+  if (hour < 10) return 'Morning';
+  if (hour < 15) return 'Midday';
+  return 'Evening';
+}
+
 export function formatSubject(date: Date = new Date()): string {
   const dateStr = date.toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
     day: 'numeric'
   });
-  return `Weather Briefing - ${dateStr}`;
+  const timeLabel = getTimeLabel(date);
+  return `${timeLabel} Weather - ${dateStr}`;
 }
 
 // Allow running directly for testing
