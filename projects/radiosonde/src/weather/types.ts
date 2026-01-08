@@ -99,6 +99,28 @@ export interface AirportObservation {
   precipYesterday: number;
 }
 
+export type DroneCondition = 'excellent' | 'good' | 'marginal' | 'no-fly';
+
+export interface DroneHourForecast {
+  hour: number;           // 0-23
+  timeLabel: string;      // "6 AM", "12 PM", etc.
+  condition: DroneCondition;
+  temperature: number;
+  windSpeed: number;      // mph
+  windDirection: string;
+  precipChance: number;   // percentage
+  shortForecast: string;
+  issues: string[];       // e.g., ["High winds", "Precipitation likely"]
+}
+
+export interface DroneForecast {
+  date: string;
+  hours: DroneHourForecast[];
+  bestWindow: string | null;      // e.g., "6 AM - 10 AM"
+  flyableHours: number;
+  summary: string;
+}
+
 export interface WeatherData {
   tempest?: TempestData;
   afd?: AFDData;
@@ -107,5 +129,6 @@ export interface WeatherData {
   alerts?: Alert[];
   precip?: ObservationPrecip;
   airport?: AirportObservation;
+  droneForecast?: DroneForecast;
   fetchedAt: Date;
 }

@@ -7,7 +7,7 @@
 
 import { CONFIG, validateConfig } from './config.ts';
 import { fetchTempest } from './weather/tempest.ts';
-import { fetchAFD, fetchHWO, fetchForecast, fetchAlerts, fetchAirportObservation } from './weather/nws.ts';
+import { fetchAFD, fetchHWO, fetchForecast, fetchAlerts, fetchAirportObservation, fetchDroneForecast } from './weather/nws.ts';
 import { generateNarrative } from './ai/claude.ts';
 import { sendEmail, formatSubject } from './email/mailer.ts';
 import { renderHtmlEmail, renderTextEmail } from './email/template.ts';
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   // Fetch weather data
   console.log('\nFetching weather data...');
 
-  let tempest, afd, hwo, forecast, alerts, airport;
+  let tempest, afd, hwo, forecast, alerts, airport, droneForecast;
 
   // Priority 1: Current conditions (critical)
   try {
@@ -48,14 +48,18 @@ async function main(): Promise<void> {
 
   // Priority 2: NWS data (important but degradable)
   try {
-    [afd, hwo, forecast, alerts, airport] = await Promise.all([
+    [afd, hwo, forecast, alerts, airport, droneForecast] = await Promise.all([
       fetchWithRetry(() => fetchAFD(), { retries: 2 }),
       fetchWithRetry(() => fetchHWO(), { retries: 2 }),
       fetchWithRetry(() => fetchForecast(), { retries: 2 }),
       fetchWithRetry(() => fetchAlerts(), { retries: 2 }),
-      fetchWithRetry(() => fetchAirportObservation('KBUF'), { retries: 2 })
+      fetchWithRetry(() => fetchAirportObservation('KBUF'), { retries: 2 }),
+      fetchWithRetry(() => fetchDroneForecast(), { retries: 2 })
     ]);
     console.log('  NWS data fetched');
+    if (droneForecast) {
+      console.log(`  Drone forecast: ${droneForecast.flyableHours} flyable hours`);
+    }
   } catch (error) {
     console.warn('  Some NWS data unavailable:', error);
   }
@@ -68,6 +72,7 @@ async function main(): Promise<void> {
     forecast: forecast || [],
     alerts: alerts || [],
     airport,
+    droneForecast,
     fetchedAt: new Date()
   };
 

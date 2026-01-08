@@ -3,7 +3,7 @@
  */
 
 import { CONFIG } from '../config.ts';
-import { AFDData, HWOData, ForecastPeriod, Alert, ObservationPrecip, AirportObservation } from './types.ts';
+import { AFDData, HWOData, ForecastPeriod, Alert, ObservationPrecip, AirportObservation, DroneForecast, DroneHourForecast, DroneCondition } from './types.ts';
 
 const USER_AGENT = '(Radiosonde Weather Email, github.com/radiosonde)';
 
@@ -377,6 +377,213 @@ export async function fetchAlerts(): Promise<Alert[]> {
   } catch (error) {
     console.error('Failed to fetch NWS alerts:', error);
     return [];
+  }
+}
+
+/**
+ * Analyze drone flying conditions based on weather
+ * DJI drones typically max out at 20-25 mph winds
+ */
+function analyzeDroneCondition(
+  windSpeed: number,
+  precipChance: number,
+  temperature: number,
+  forecast: string
+): { condition: DroneCondition; issues: string[] } {
+  const issues: string[] = [];
+  let condition: DroneCondition = 'excellent';
+
+  // Wind analysis (DJI limits ~25mph, ideal <12mph)
+  if (windSpeed >= 25) {
+    condition = 'no-fly';
+    issues.push('Winds exceed drone limits');
+  } else if (windSpeed >= 20) {
+    condition = 'marginal';
+    issues.push('High winds - experienced pilots only');
+  } else if (windSpeed >= 15) {
+    if (condition === 'excellent') condition = 'good';
+    issues.push('Moderate winds');
+  }
+
+  // Precipitation analysis
+  if (precipChance >= 70 || forecast.toLowerCase().includes('rain') ||
+      forecast.toLowerCase().includes('snow') || forecast.toLowerCase().includes('storm')) {
+    condition = 'no-fly';
+    issues.push('Precipitation likely');
+  } else if (precipChance >= 40) {
+    if (condition !== 'no-fly') condition = 'marginal';
+    issues.push('Chance of precipitation');
+  }
+
+  // Temperature analysis (battery performance)
+  if (temperature <= 20) {
+    if (condition === 'excellent') condition = 'good';
+    issues.push('Cold - reduced battery life');
+  } else if (temperature <= 32) {
+    if (condition === 'excellent') condition = 'good';
+    issues.push('Cold - monitor battery');
+  } else if (temperature >= 95) {
+    if (condition === 'excellent') condition = 'good';
+    issues.push('Hot - risk of overheating');
+  }
+
+  // Fog/visibility
+  if (forecast.toLowerCase().includes('fog')) {
+    condition = 'no-fly';
+    issues.push('Fog - visibility below Part 107 minimums');
+  }
+
+  return { condition, issues };
+}
+
+function formatHour(hour: number): string {
+  if (hour === 0 || hour === 24) return '12 AM';
+  if (hour === 12) return '12 PM';
+  if (hour < 12) return `${hour} AM`;
+  return `${hour - 12} PM`;
+}
+
+function parseWindSpeed(windStr: string): number {
+  // Parse "15 mph" or "10 to 20 mph" format
+  const match = windStr.match(/(\d+)\s*(?:to\s*(\d+))?\s*mph/i);
+  if (match) {
+    // If range, use the higher value for safety
+    return match[2] ? parseInt(match[2]) : parseInt(match[1]);
+  }
+  return 0;
+}
+
+/**
+ * Fetch hourly forecast and analyze for drone flying conditions
+ * Returns forecast for 6 AM to midnight (Part 107 with night waiver)
+ */
+export async function fetchDroneForecast(): Promise<DroneForecast | undefined> {
+  try {
+    // Get gridpoint info first
+    const pointsResponse = await fetch(CONFIG.nws.pointsUrl, {
+      headers: { 'User-Agent': USER_AGENT }
+    });
+
+    if (!pointsResponse.ok) {
+      throw new Error(`NWS Points API error: ${pointsResponse.status}`);
+    }
+
+    const pointsData = await pointsResponse.json();
+    const hourlyUrl = pointsData.properties.forecastHourly;
+
+    // Get hourly forecast
+    const hourlyResponse = await fetch(hourlyUrl, {
+      headers: { 'User-Agent': USER_AGENT }
+    });
+
+    if (!hourlyResponse.ok) {
+      throw new Error(`NWS Hourly Forecast error: ${hourlyResponse.status}`);
+    }
+
+    const hourlyData = await hourlyResponse.json();
+    const periods = hourlyData.properties.periods;
+
+    // Get today's date
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    // Filter to today's hours from 6 AM to midnight (hour 23)
+    const todayHours: DroneHourForecast[] = [];
+
+    for (const period of periods) {
+      const periodDate = new Date(period.startTime);
+      const hour = periodDate.getHours();
+
+      // Only include today's hours from 6 AM to 11 PM
+      if (periodDate.toDateString() !== now.toDateString()) {
+        // If we've moved to tomorrow, stop
+        if (todayHours.length > 0) break;
+        continue;
+      }
+
+      if (hour < 6) continue; // Skip before 6 AM
+      if (hour >= 24) break;   // Stop at midnight
+
+      const windSpeed = parseWindSpeed(period.windSpeed);
+      const precipChance = period.probabilityOfPrecipitation?.value || 0;
+      const { condition, issues } = analyzeDroneCondition(
+        windSpeed,
+        precipChance,
+        period.temperature,
+        period.shortForecast
+      );
+
+      todayHours.push({
+        hour,
+        timeLabel: formatHour(hour),
+        condition,
+        temperature: period.temperature,
+        windSpeed,
+        windDirection: period.windDirection,
+        precipChance,
+        shortForecast: period.shortForecast,
+        issues
+      });
+    }
+
+    // Calculate best flying window
+    let bestWindowStart: number | null = null;
+    let bestWindowEnd: number | null = null;
+    let currentWindowStart: number | null = null;
+    let longestWindow = 0;
+    let currentWindowLength = 0;
+    let flyableHours = 0;
+
+    for (const hour of todayHours) {
+      if (hour.condition === 'excellent' || hour.condition === 'good') {
+        flyableHours++;
+        if (currentWindowStart === null) {
+          currentWindowStart = hour.hour;
+        }
+        currentWindowLength++;
+      } else {
+        if (currentWindowLength > longestWindow) {
+          longestWindow = currentWindowLength;
+          bestWindowStart = currentWindowStart;
+          bestWindowEnd = todayHours.find(h => h.hour === currentWindowStart)!.hour + currentWindowLength - 1;
+        }
+        currentWindowStart = null;
+        currentWindowLength = 0;
+      }
+    }
+
+    // Check if the last window was the longest
+    if (currentWindowLength > longestWindow && currentWindowStart !== null) {
+      bestWindowStart = currentWindowStart;
+      bestWindowEnd = currentWindowStart + currentWindowLength - 1;
+    }
+
+    const bestWindow = bestWindowStart !== null && bestWindowEnd !== null
+      ? `${formatHour(bestWindowStart)} - ${formatHour(bestWindowEnd + 1)}`
+      : null;
+
+    // Generate summary
+    let summary: string;
+    if (flyableHours === 0) {
+      summary = 'No suitable flying conditions today. Check individual hours for details.';
+    } else if (flyableHours >= 12) {
+      summary = 'Excellent flying day! Most hours are suitable for drone operations.';
+    } else if (flyableHours >= 6) {
+      summary = `Good flying conditions for ${flyableHours} hours today.${bestWindow ? ` Best window: ${bestWindow}.` : ''}`;
+    } else {
+      summary = `Limited flying windows today (${flyableHours} hours).${bestWindow ? ` Best window: ${bestWindow}.` : ''}`;
+    }
+
+    return {
+      date: todayStr,
+      hours: todayHours,
+      bestWindow,
+      flyableHours,
+      summary
+    };
+  } catch (error) {
+    console.error('Failed to fetch drone forecast:', error);
+    return undefined;
   }
 }
 

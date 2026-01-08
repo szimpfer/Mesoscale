@@ -125,14 +125,40 @@ ACTIVE ALERTS:
     });
   }
 
+  // Drone forecast section
+  const drone = data.droneForecast;
+  if (drone) {
+    prompt += `
+DRONE FLYING CONDITIONS (Part 107, 6 AM - Midnight):
+Summary: ${drone.summary}
+${drone.bestWindow ? `Best Window: ${drone.bestWindow}` : 'No ideal window identified'}
+Flyable Hours: ${drone.flyableHours} of ${drone.hours.length}
+
+Hourly Breakdown:
+`;
+    // Show condensed hourly view
+    const conditionIcons: Record<string, string> = {
+      'excellent': '🟢',
+      'good': '🟡',
+      'marginal': '🟠',
+      'no-fly': '🔴'
+    };
+    drone.hours.forEach(h => {
+      const icon = conditionIcons[h.condition] || '⚪';
+      prompt += `${h.timeLabel}: ${icon} ${h.condition.toUpperCase()} - ${h.windSpeed}mph ${h.windDirection}, ${h.temperature}°F${h.issues.length > 0 ? ` (${h.issues.join(', ')})` : ''}
+`;
+    });
+  }
+
   prompt += `
-Write a conversational ${timeContext.label} weather briefing (3-4 short paragraphs, under 300 words) that:
+Write a conversational ${timeContext.label} weather briefing (4-5 short paragraphs, under 350 words) that:
 1. Opens with "${timeContext.greeting}" and current conditions in plain language
 2. ${timeContext.focus}
 3. Highlights notable weather in the next 7 days
 4. Mentions any hazards or alerts (if present)
-5. Uses a friendly, informative tone - like talking to a friend
-6. If relevant, mention impacts for Michelle's commute to Alden or Scott's Thursday commute to East Aurora
+5. IMPORTANT: Include a brief drone flying summary - mention the best window and conditions. Scott has DJI drones with Part 107 certification (can fly at night until midnight).
+6. Uses a friendly, informative tone - like talking to a friend
+7. If relevant, mention impacts for Michelle's commute to Alden or Scott's Thursday commute to East Aurora
 
 DATA SOURCES:
 - Personal station: temperature, feels like, wind, humidity, pressure

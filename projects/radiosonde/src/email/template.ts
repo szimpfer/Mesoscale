@@ -3,7 +3,7 @@
  * Dashboard-style design with metrics grid
  */
 
-import { WeatherData, Alert } from '../weather/types.ts';
+import { WeatherData, Alert, DroneForecast, DroneCondition } from '../weather/types.ts';
 import { CONFIG } from '../config.ts';
 import { formatDateTime, formatDate, mbToInHg } from '../weather/utils.ts';
 
@@ -53,6 +53,83 @@ function getSeverityColor(severity: string): { bg: string; border: string; text:
     default:
       return { bg: '#f0fdf4', border: '#22c55e', text: '#166534' };
   }
+}
+
+function getDroneConditionStyle(condition: DroneCondition): { bg: string; color: string; icon: string } {
+  switch (condition) {
+    case 'excellent':
+      return { bg: '#22c55e', color: 'white', icon: '🟢' };
+    case 'good':
+      return { bg: '#eab308', color: 'white', icon: '🟡' };
+    case 'marginal':
+      return { bg: '#f97316', color: 'white', icon: '🟠' };
+    case 'no-fly':
+      return { bg: '#ef4444', color: 'white', icon: '🔴' };
+    default:
+      return { bg: '#64748b', color: 'white', icon: '⚪' };
+  }
+}
+
+function renderDroneForecast(drone: DroneForecast): string {
+  // Create a visual timeline of flying conditions
+  const hourBlocks = drone.hours.map(h => {
+    const style = getDroneConditionStyle(h.condition);
+    return `<td style="padding: 2px;">
+      <div style="background: ${style.bg}; color: ${style.color}; border-radius: 4px; padding: 4px 2px; text-align: center; font-size: 10px;">
+        <div style="font-weight: 600;">${h.timeLabel.replace(' ', '')}</div>
+        <div style="font-size: 14px;">${style.icon}</div>
+        <div>${h.windSpeed}mph</div>
+      </div>
+    </td>`;
+  }).join('');
+
+  // Determine overall status color
+  let statusColor = '#22c55e';
+  let statusText = 'Excellent';
+  if (drone.flyableHours === 0) {
+    statusColor = '#ef4444';
+    statusText = 'No Fly';
+  } else if (drone.flyableHours < 6) {
+    statusColor = '#f97316';
+    statusText = 'Limited';
+  } else if (drone.flyableHours < 12) {
+    statusColor = '#eab308';
+    statusText = 'Good';
+  }
+
+  return `
+    <div style="margin-bottom: 24px;">
+      <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; margin-bottom: 12px; font-weight: 600;">
+        🚁 Drone Flying Forecast <span style="font-weight: normal; opacity: 0.8;">(Part 107 • 6 AM - Midnight)</span>
+      </div>
+
+      <!-- Summary Card -->
+      <div style="background: linear-gradient(135deg, #1e3a5f 0%, #1e293b 100%); border-radius: 12px; padding: 16px; margin-bottom: 12px; color: white;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <div>
+            <div style="font-size: 24px; font-weight: bold;">${drone.flyableHours} <span style="font-size: 14px; font-weight: normal; opacity: 0.8;">flyable hours</span></div>
+            ${drone.bestWindow ? `<div style="font-size: 13px; opacity: 0.9; margin-top: 4px;">Best window: <strong>${drone.bestWindow}</strong></div>` : ''}
+          </div>
+          <div style="background: ${statusColor}; padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 12px;">
+            ${statusText}
+          </div>
+        </div>
+        <div style="font-size: 13px; opacity: 0.85; line-height: 1.5;">
+          ${drone.summary}
+        </div>
+      </div>
+
+      <!-- Hourly Timeline -->
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; overflow-x: auto;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="min-width: 500px;">
+          <tr>${hourBlocks}</tr>
+        </table>
+        <div style="margin-top: 8px; font-size: 10px; color: #64748b; text-align: center;">
+          🟢 Excellent &nbsp; 🟡 Good &nbsp; 🟠 Marginal &nbsp; 🔴 No-Fly
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function formatNarrative(narrative: string): string {
@@ -237,6 +314,9 @@ export function renderHtmlEmail(data: TemplateData): string {
 
   const metricsHtml = (t || a) ? `${tempestHtml}${airportHtml}` : '<p style="color: #64748b; text-align: center; padding: 40px;">Station data unavailable</p>';
 
+  // Drone forecast section
+  const droneHtml = weather.droneForecast ? renderDroneForecast(weather.droneForecast) : '';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -262,6 +342,9 @@ export function renderHtmlEmail(data: TemplateData): string {
 
       <!-- Dashboard Metrics -->
       ${metricsHtml}
+
+      <!-- Drone Forecast -->
+      ${droneHtml}
 
       <!-- Narrative Section -->
       <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border-radius: 12px; padding: 20px; margin-top: 8px; border: 1px solid #e2e8f0;">
@@ -353,12 +436,42 @@ ${'─'.repeat(50)}
    📊  Pressure       ${a.pressureIn}" (${Math.round(a.pressureMb)} mb)
    🌧️  Precipitation  ${a.precipToday}" today, ${a.precipYesterday}" yesterday
 
-${'━'.repeat(50)}
+`;
+  }
+
+  // Drone forecast section
+  const drone = weather.droneForecast;
+  if (drone) {
+    const conditionSymbols: Record<string, string> = {
+      'excellent': '🟢',
+      'good': '🟡',
+      'marginal': '🟠',
+      'no-fly': '🔴'
+    };
+
+    text += `🚁 DRONE FLYING FORECAST (Part 107 • 6 AM - Midnight)
+${'─'.repeat(50)}
+
+   Flyable Hours:  ${drone.flyableHours} of ${drone.hours.length}
+   ${drone.bestWindow ? `Best Window:    ${drone.bestWindow}` : 'No ideal window identified'}
+
+   ${drone.summary}
+
+   Hourly: `;
+    text += drone.hours.map(h => `${conditionSymbols[h.condition] || '⚪'}`).join('');
+    text += `
+           `;
+    text += drone.hours.map(h => h.timeLabel.replace(' ', '').padStart(4)).join(' ');
+    text += `
+
+   Legend: 🟢 Excellent  🟡 Good  🟠 Marginal  🔴 No-Fly
 
 `;
   }
 
-  text += `AI BRIEFING
+  text += `${'━'.repeat(50)}
+
+AI BRIEFING
 ${'─'.repeat(50)}
 
 ${narrative}
